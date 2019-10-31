@@ -1,0 +1,14 @@
+- name: pivnet-to-s3-ops-manager
+  plan:
+  - in_parallel:
+    - get: pivnet-ops-manager
+      trigger: true
+      tags: [backups]
+      params:
+        globs:
+        - "*.ova"
+  - put: ops-manager-image
+    tags: [backups]
+    params:
+      file: "pivnet-ops-manager/*.ova"
+

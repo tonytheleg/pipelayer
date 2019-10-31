@@ -1,0 +1,12 @@
+- name: pivnet-to-s3-TILE_NAME
+  plan:
+  - aggregate:
+    - get: pivnet-TILE_NAME
+      trigger: true
+      params:
+        globs:
+        - INSERT_PRODUCT_GLOB_HERE
+  - put: TILE_NAME-tile
+    params:
+      file: "pivnet-TILE_NAME/*.pivotal"
+

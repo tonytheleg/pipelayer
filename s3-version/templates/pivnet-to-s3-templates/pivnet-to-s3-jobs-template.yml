@@ -1,0 +1,25 @@
+- name: pivnet-to-s3-TILE_NAME
+  plan:
+  - in_parallel:
+    - get: pivnet-TILE_NAME
+      trigger: true
+      params:
+        globs:
+        - INSERT_PRODUCT_GLOB_HERE
+      tags: [backups]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: injection-junction
+    tags: [backups]
+    image: platform-automation-image
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/injection-junction.yml
+    input_mapping:
+      product: pivnet-TILE_NAME
+  - put: TILE_NAME-tile
+    params:
+      file: "fetched-tile/*.pivotal"
+

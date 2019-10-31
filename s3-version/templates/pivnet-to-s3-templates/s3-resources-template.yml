@@ -1,0 +1,25 @@
+resource_types:
+- name: pivnet
+  type: docker-image
+  source:
+    repository: ((region_docker))/pcf-admins/pivnet-resource
+    insecure_registries: ["((region_docker)):443"]
+
+resources:
+- name: tile-configurator
+  type: git
+  source:
+    uri: ((tile_config_repo))
+    username: ((git_automation.username))
+    password: ((git_automation.password))
+    skip_ssl_verification: true
+
+- name: platform-automation-image
+  type: s3
+  source:
+    endpoint: ((region_s3_endpoint))
+    access_key_id: ((region_s3.username))
+    secret_access_key: ((region_s3.password))
+    bucket: pcf-automation
+    regexp: platform-automation-image-(.*).tgz
+

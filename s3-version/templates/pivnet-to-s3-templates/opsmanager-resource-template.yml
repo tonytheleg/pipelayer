@@ -1,0 +1,20 @@
+- name: pivnet-ops-manager
+  type: pivnet
+  check_every: 696h
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: ops-manager
+    product_version: INSERT_PRODUCT_REGEX_HERE
+    sort_by: semver
+
+- name: ops-manager-image
+  type: s3
+  source:
+    bucket: pcf-automation
+    access_key_id: ((region_s3.username))
+    secret_access_key: ((region_s3.password))
+    endpoint: ((region_s3_endpoint))
+    regexp: tiles/ops-manager-vsphere-(.*).ova
+    skip_download: true
+

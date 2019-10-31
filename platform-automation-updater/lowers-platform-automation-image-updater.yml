@@ -1,0 +1,76 @@
+resource_types:
+- name: pivnet
+  type: docker-image
+  source:
+    repository: harbor.sys.cloudfoundry.onefiserv.net/pcf-admins/pivnet-resource
+    insecure_registries: ["harbor.sys.cloudfoundry.onefiserv.net:443"]
+
+resources:
+- name: fiserv-clitools
+  type: docker-image
+  source:
+    repository: harbor.sys.cloudfoundry.onefiserv.net/pcf-admins/clitools
+
+- name: tile-configurator
+  type: git
+  source:
+    uri: "https://gogs.sys.fog.onefiserv.net/pcf-admin/tile-configurator"
+    username: ((git_automation.username))
+    password: ((git_automation.password))
+    skip_ssl_verification: true
+
+- name: pivnet-platform-automation
+  type: pivnet
+  check_every: 24h
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: platform-automation
+    product_version: ^3\.0\..*$
+    sort_by: semver
+
+- name: platform-automation-tasks
+  type: s3
+  source:
+    endpoint: "http://lower-ecs.onefiserv.net:9020"
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    bucket: pcf-automation
+    regexp: platform-automation-tasks-(.*).zip
+    skip_download: true
+
+- name: platform-automation-image
+  type: s3
+  source:
+    endpoint: "http://lower-ecs.onefiserv.net:9020"
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    bucket: pcf-automation
+    regexp: platform-automation-image-(.*).tgz
+    skip_download: true
+
+
+jobs:
+- name: get-platform-automation-files
+  plan:
+  - in_parallel:
+    - get: pivnet-platform-automation
+      trigger: true
+      tags: [backups]
+    - get: tile-configurator
+      tags: [backups]
+    - get: fiserv-clitools
+      tags: [backups]
+  - task: unpack-and-update-docker-image
+    tags: [backups]
+    image: fiserv-clitools
+    file: tile-configurator/pcf-automation/platform-automation-updater/extra-tasks/update-platform-automation-image.yml
+    input_mapping:
+      product: pivnet-platform-automation
+  - put: platform-automation-image
+    params:
+      file: "modified/*.tgz"
+  - put: platform-automation-tasks
+    params:
+      file: "pivnet-platform-automation/*.zip"
+

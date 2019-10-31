@@ -1,0 +1,86 @@
+resources:
+- name: tile-configurator
+  type: git
+  source:
+    uri: ((tile_config_repo))
+    username: ((git_automation.username))
+    password: ((git_automation.password))
+    skip_ssl_verification: true
+    paths: ["automation-configs/*"]
+
+- name: fiserv-clitools
+  type: docker-image
+  source:
+    repository: ((region_docker))/pcf-admins/clitools
+
+jobs:
+- name: update-pivnet-to-s3
+  plan:
+  - in_parallel:
+    - get: tile-configurator
+      trigger: true
+    - get: fiserv-clitools
+  - task: push-pivnet-to-s3-pipeline
+    image: fiserv-clitools
+    file: tile-configurator/pcf-automation/platform-automation-updater/extra-tasks/deploy-pivnet-to-s3.yml
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/((foundation)).yml
+      CONCOURSE_URL: ((concourse_url))
+      CONCOURSE_USER: ((concourse_user.username))
+      CONCOURSE_PASS: ((concourse_user.password))
+
+- name: update-opsman-upgrader
+  plan:
+  - in_parallel:
+    - get: tile-configurator
+      trigger: true
+      passed: [update-pivnet-to-s3]
+    - get: fiserv-clitools
+  - task: push-upgrade-opsman
+    image: fiserv-clitools
+    file: tile-configurator/pcf-automation/platform-automation-updater/extra-tasks/deploy-opsman-upgrader.yml
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/((foundation)).yml
+      CONCOURSE_URL: ((concourse_url))
+      CONCOURSE_USER: ((concourse_user.username))
+      CONCOURSE_PASS: ((concourse_user.password))
+
+- name: update-tile-upgrader
+  plan:
+  - in_parallel:
+    - get: tile-configurator
+      trigger: true
+      passed: [update-opsman-upgrader]
+    - get: fiserv-clitools
+  - task: push-tile-upgrader
+    image: fiserv-clitools
+    file: tile-configurator/pcf-automation/platform-automation-updater/extra-tasks/deploy-tile-upgrader.yml
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/((foundation)).yml
+      CONCOURSE_URL: ((concourse_url))
+      CONCOURSE_USER: ((concourse_user.username))
+      CONCOURSE_PASS: ((concourse_user.password))
+
+- name: update-stemcell-upgrader
+  plan:
+  - in_parallel:
+    - get: tile-configurator
+      trigger: true
+      passed: [update-tile-upgrader]
+    - get: fiserv-clitools
+  - task: push-stemcell-upgrader
+    image: fiserv-clitools
+    file: tile-configurator/pcf-automation/platform-automation-updater/extra-tasks/deploy-stemcell-upgrader.yml
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/((foundation)).yml
+      CONCOURSE_URL: ((concourse_url))
+      CONCOURSE_USER: ((concourse_user.username))
+      CONCOURSE_PASS: ((concourse_user.password))

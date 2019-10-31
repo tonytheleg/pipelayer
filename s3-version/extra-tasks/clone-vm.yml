@@ -1,0 +1,25 @@
+---
+platform: linux
+
+
+params:
+  GOVC_URL:
+  GOVC_USERNAME: 
+  GOVC_PASSWORD:
+  GOVC_DATASTORE: 
+  GOVC_RESOURCE_POOL: 
+  GOVC_FOLDER: 
+  GOVC_INSECURE:
+  GOVC_VM: 
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -ux
+
+    # destroy the old one
+    govc vm.destroy "${GOVC_VM}-PREUPGRADE" 
+    govc vm.clone -on=false -vm "$GOVC_VM" "${GOVC_VM}-PREUPGRADE"

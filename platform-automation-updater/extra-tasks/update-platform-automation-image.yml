@@ -1,0 +1,38 @@
+---
+platform: linux
+
+inputs:
+- name: product
+
+outputs:
+- name: modified
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -x
+
+    # get the downloaded file name for editing and removing
+    image_tar=$(ls product/*.tgz)
+    image_file=$(basename $image_tar)
+    image_file_name=$(echo ${image_file%.*})
+
+
+    # untar the automation image
+    tar -C modified/ -zxf $image_tar
+    
+    # get replicator
+    replicator_release=$(curl -s https://api.github.com/repos/pivotal-cf/replicator/releases/latest | grep browser_download_url | grep linux | cut -d '"' -f 4)
+    wget --no-check-certificate -O replicator $replicator_release
+    chmod +x replicator && mv replicator modified/rootfs/usr/bin/
+    
+    # get mc
+    wget https://dl.minio.io/client/mc/release/linux-amd64/mc 
+    chmod +x mc && mv mc modified/rootfs/usr/bin/
+    
+    # wrap it up, B
+    tar -C modified/ -zcf ${image_file_name}-modified.tgz ./
+    mv ${image_file_name}-modified.tgz modified/

@@ -1,0 +1,55 @@
+---
+platform: linux
+
+inputs:
+- name: env # contains the env file with target OpsMan Information
+- name: tasks
+- name: image-file
+
+params:
+  ENV_FILE: env.yml
+  # - Filepath of the env config YAML
+  # - The path is relative to root of the `env` input
+  REGION_S3_ENDPOINT:
+  REGION_ACCESS_KEY:
+  REGION_SECRET_KEY:
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -x
+
+    # set some vars
+    ecs_apps_user=$(grep ^ecs_apps_user env/${ENV_FILE} | cut -d ":" -f 2 | tr -d " ")
+    ecs_apps_user_secret=$(grep ^ecs_apps_user_secret env/${ENV_FILE} | cut -d ":" -f 2 | tr -d " ")
+    # using ':' as a delimiter messes with URLs, so gotta grab 2 fields for endpoint
+    ecs_object_endpoint=$(grep ^ecs_object_endpoint env/${ENV_FILE} | cut -d ":" -f 2-4 | tr -d " ")
+    foundation=$(basename ${ENV_FILE} .yml)
+
+    # get the downloaded file names for copying
+    image_tar=$(ls image-file/*.tgz)
+    tasks_zip=$(ls tasks/*.zip)
+
+    
+    # set mc config
+    echo "setting up mc config..."
+    mc -insecure -C ./mc-config config host add pxe $REGION_S3_ENDPOINT $REGION_ACCESS_KEY $REGION_SECRET_KEY
+    mc -insecure -C ./mc-config config host add $foundation $ecs_object_endpoint $ecs_apps_user $ecs_apps_user_secret
+    
+    # remove older versions of platform-automation files
+    current_tasks_ver=$(mc -insecure -C ./mc-config ls --json ${foundation}/pcf-automation/ | jq -r '.key' | grep tasks)
+    current_image_ver=$(mc -insecure -C ./mc-config ls --json ${foundation}/pcf-automation/ | jq -r '.key' | grep image)
+
+    for i in $foundation; do
+        mc -insecure -C ./mc-config rm ${i}/pcf-automation/${current_tasks_ver}
+        mc -insecure -C ./mc-config rm ${i}/pcf-automation/${current_image_ver}
+    done
+
+    # copy files from pxe to container to foundation minio
+    mc -insecure -C ./mc-config cp $image_tar ${foundation}/pcf-automation/
+    mc -insecure -C ./mc-config cp $tasks_zip ${foundation}/pcf-automation/
+
+

@@ -1,0 +1,52 @@
+- name: upgrade-TILE_NAME-tile
+  serial_groups: [one-at-a-time]
+  plan:
+  - in_parallel:
+    - get: TILE_NAME-tile
+      tags: [backups]
+      trigger: true
+    - get: tile-configurator
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+    - get: platform-automation-tasks
+      params:
+        unpack: true
+# NON-REPLICATED-TILE+++
+  - task: upload-and-stage-product
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-and-stage-product.yml
+    input_mapping:
+      product: TILE_NAME-tile
+      env: tile-configurator
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+# NON-REPLICATED-TILE---
+# REPLICATED-TILE+++
+  - task: upload-stage-and-replicate-product
+    tags: [backups]
+    image: platform-automation-image
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/upload-stage-and-replicate-product.yml
+    input_mapping:
+      product: TILE_NAME-tile
+      env: tile-configurator
+      config: tile-configurator
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+      CONFIG_FILE: automation-configs/INSERT_PRODUCT_HERE
+# REPLICATED-TILE---
+  - task: configure-product
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/configure-product.yml
+    input_mapping:
+      config: tile-configurator
+      env: tile-configurator
+      vars: tile-configurator
+    params:
+      CONFIG_FILE: products/INSERT_PRODUCT_HERE
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+      VARS_FILES: vars/envs/INSERT_FOUNDATION_HERE.yml
+

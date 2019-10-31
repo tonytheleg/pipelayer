@@ -1,0 +1,171 @@
+resource_types:
+- name: pivnet
+  type: docker-image
+  source:
+    repository: ((docker_registry))/pcf-admins/pivnet-resource
+    insecure_registries: ["((docker_registry)):443"]
+
+resources:
+- name: platform-automation-tasks
+  type: s3
+  source:
+    endpoint: ((ecs_object_endpoint))
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    bucket: pcf-automation
+    regexp: platform-automation-tasks-(.*).zip
+
+- name: platform-automation-image
+  type: s3
+  source:
+    endpoint: ((ecs_object_endpoint))
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    bucket: pcf-automation
+    regexp: platform-automation-image-(.*).tgz
+
+- name: tile-configurator
+  type: git
+  source:
+    uri: ((tile_config_repo))
+    username: ((git_automation.username))
+    password: ((git_automation.password))
+    skip_ssl_verification: true
+
+- name: stemcell-xenial-97
+  type: pivnet
+  check_every: 60s
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: stemcells-ubuntu-xenial
+    product_version: ^97(\.\d*)?$
+    sort_by: semver
+
+- name: stemcell-xenial-170
+  type: pivnet
+  check_every: 60s
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: stemcells-ubuntu-xenial
+    product_version: ^170(\.\d*)?$
+    sort_by: semver
+
+- name: stemcell-xenial-250
+  type: pivnet
+  check_every: 60s
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: stemcells-ubuntu-xenial
+    product_version: ^250(\.\d*)?$
+    sort_by: semver
+
+- name: stemcell-xenial-315
+  type: pivnet
+  check_every: 60s
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: stemcells-ubuntu-xenial
+    product_version: ^315(\.\d*)?$
+    sort_by: semver
+
+- name: stemcell-xenial-456
+  type: pivnet
+  check_every: 60s
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: stemcells-ubuntu-xenial
+    product_version: ^456(\.\d*)?$
+
+jobs:
+- name: update-stemcells
+  plan:
+  - get: platform-automation-image
+    tags: [backups]
+    params:
+      unpack: true
+  - get: platform-automation-tasks
+    trigger: true
+    params:
+      unpack: true
+  - get: stemcell-xenial-97
+    tags: [backups]
+    params:
+      globs:
+      - "*vsphere*"
+  - get: stemcell-xenial-170
+    tags: [backups]
+    params:
+      globs:
+      - "*vsphere*"
+  - get: stemcell-xenial-250
+    tags: [backups]
+    params:
+      globs:
+      - "*vsphere*"
+  - get: stemcell-xenial-315
+    tags: [backups]
+    params:
+      globs:
+      - "*vsphere*"
+  - get: stemcell-xenial-456
+    tags: [backups]
+    params:
+      globs:
+      - "*vsphere*"
+  - get: tile-configurator
+
+  - task: upload-xenial-97-stemcells
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: tile-configurator
+      stemcell: stemcell-xenial-97
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+      FLOATING_STEMCELL: true
+  
+  - task: upload-xenial-170-stemcells
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: tile-configurator
+      stemcell: stemcell-xenial-170
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+
+  - task: upload-xenial-250-stemcells
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: tile-configurator
+      stemcell: stemcell-xenial-250
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+
+  - task: upload-xenial-315-stemcells
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: tile-configurator
+      stemcell: stemcell-xenial-315
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+  
+  - task: upload-xenial-456-stemcells
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: tile-configurator
+      stemcell: stemcell-xenial-456
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml

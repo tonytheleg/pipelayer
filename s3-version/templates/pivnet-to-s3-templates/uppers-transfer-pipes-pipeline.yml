@@ -1,0 +1,143 @@
+- name: transfer-pipes-lva
+  plan:
+  - in_parallel:
+    - get: cf-tile
+      trigger: true
+      passed: [pivnet-to-s3-cf]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: transfer-tiles
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/transfer-pipes.yml
+    image: platform-automation-image
+    tags: [backups]
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/lva.yml
+      REGION_S3_ENDPOINT: ((region_s3_endpoint))
+      REGION_ACCESS_KEY: ((region_s3.username))
+      REGION_SECRET_KEY: ((region_s3.password))
+
+- name: transfer-pipes-lvc
+  plan:
+  - in_parallel:
+    - get: cf-tile
+      trigger: true
+      passed: [pivnet-to-s3-cf]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: transfer-tiles
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/transfer-pipes.yml
+    image: platform-automation-image
+    tags: [backups]
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/lvc.yml
+      REGION_S3_ENDPOINT: ((region_s3_endpoint))
+      REGION_ACCESS_KEY: ((region_s3.username))
+      REGION_SECRET_KEY: ((region_s3.password))
+
+- name: transfer-pipes-pxa
+  plan:
+  - in_parallel:
+    - get: cf-tile
+      trigger: true
+      passed: [pivnet-to-s3-cf]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: transfer-tiles
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/transfer-pipes.yml
+    image: platform-automation-image
+    tags: [backups]
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/pxa.yml
+      REGION_S3_ENDPOINT: ((region_s3_endpoint))
+      REGION_ACCESS_KEY: ((region_s3.username))
+      REGION_SECRET_KEY: ((region_s3.password))
+
+- name: transfer-pipes-pxc
+  plan:
+  - in_parallel:
+    - get: cf-tile
+      trigger: true
+      passed: [pivnet-to-s3-cf]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: transfer-tiles
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/transfer-pipes.yml
+    image: platform-automation-image
+    tags: [backups]
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/pxc.yml
+      REGION_S3_ENDPOINT: ((region_s3_endpoint))
+      REGION_ACCESS_KEY: ((region_s3.username))
+      REGION_SECRET_KEY: ((region_s3.password))
+
+- name: transfer-pipes-jca
+  plan:
+  - in_parallel:
+    - get: cf-tile
+      trigger: true
+      passed: [pivnet-to-s3-cf]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: transfer-tiles
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/transfer-pipes.yml
+    image: platform-automation-image
+    tags: [backups]
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/jca.yml
+      REGION_S3_ENDPOINT: ((region_s3_endpoint))
+      REGION_ACCESS_KEY: ((region_s3.username))
+      REGION_SECRET_KEY: ((region_s3.password))
+
+- name: transfer-pipes-jcc
+  plan:
+  - in_parallel:
+    - get: cf-tile
+      trigger: true
+      passed: [pivnet-to-s3-cf]
+    - get: tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+  - task: transfer-tiles
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/transfer-pipes.yml
+    image: platform-automation-image
+    tags: [backups]
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: envs/jcc.yml
+      REGION_S3_ENDPOINT: ((region_s3_endpoint))
+      REGION_ACCESS_KEY: ((region_s3.username))
+      REGION_SECRET_KEY: ((region_s3.password))

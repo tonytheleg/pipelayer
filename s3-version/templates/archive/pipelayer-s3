@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# the vip of the show
+foundation=$1
+
+# convert uppers to lowers
+foundation=$(echo "$foundation" | tr '[:upper:]' '[:lower:]')
+
+if [ -z "$foundation" ]; then
+    echo "ERROR: You did not provide needed arguments"
+    echo "Usage: pipelayer-s3 FOUNDATION (sbx, fog, lva, jcc, etc)"
+    echo "  Options:  -h, --help    Prints usage information"
+    exit 1
+fi
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    echo "Usage: pipelayer-s3 FOUNDATION (sbx, fog, lva, jcc, etc)"
+    echo "  Options:  -h, --help    Prints usage information"
+    exit 0
+fi
+
+# clean up any old pipelines so not accidentally double up
+rm ./${foundation}-upgrade-tile-pipeline.yml &> /dev/null
+
+# set up much needed vars
+env_file=${foundation}.yml
+env_path="../../envs/${env_file}"
+target=$(grep ^target $env_path | cut -d ":" -f 2 | tr -d " ")
+username=$(grep ^username $env_path | cut -d ":" -f 2 | tr -d " ")
+password=$(grep ^password $env_path | cut -d ":" -f 2 | tr -d " ")
+
+# copy resource definitions template to the new pipeline file
+cp templates/resources-template.yml ./${foundation}-upgrade-tile-pipeline.yml
+
+# check for sandbox to ensure proper upgrade tile template is used
+if [[ "$foundation" == "sbx" ]]; then
+    upgrade_tile_template="templates/sbx-upgrade-tile-jobs-template.yml"
+else
+    upgrade_tile_template="templates/upgrade-tile-jobs-template.yml"
+fi
+
+# get deployed products
+products=$(om -t "$target" -k -u admin -p "$password" curl -s -p /api/v0/deployed/products | jq -r '.[] | .type' | egrep -v "p-bosh|redislabs|newrelic-dotnet-buildpack-tile|p-metrics-forwarder")
+
+# create a job for each product with download, upload, stage, and configure tasks
+for product in ${products[@]}; do
+    # set more needed vars    
+    tile_name=$product
+    base_config="../../automation-configs/${product}.yml"
+    product_file_name=${product}.yml
+    product_glob=$(grep ^pivnet-file-glob $base_config | cut -d ":" -f 2 | tr -d " ")
+    product_slug=$(grep ^pivnet-product-slug $base_config | cut -d ":" -f 2 | tr -d " ")
+    product_regex=$(grep ^s3-version-regex $base_config | cut -d ":" -f 2 | tr -d " ")
+
+    # grab the s3 resources template to modify
+    cp templates/s3-resources-template.yml ./${foundation}-s3-resources-template.yml
+    sed -i "s/TILE_NAME/$tile_name/g" ./${foundation}-s3-resources-template.yml
+    sed -i "s/INSERT_PRODUCT_SLUG_HERE/$product_slug/g" ./${foundation}-s3-resources-template.yml
+    sed -i "s/INSERT_PRODUCT_REGEX_HERE/$product_regex/g" ./${foundation}-s3-resources-template.yml
+    cat ./${foundation}-s3-resources-template.yml >> ./all-s3-resources.yml
+
+    # grab the jobs template so we can create a job for each tile
+    cp $upgrade_tile_template ./${foundation}-upgrade-tile-temp.yml
+
+    # if its windows, we need to pull out the upload stemcell task
+    if [[ "$product" == *"windows"*  ]]; then
+        sed -i '/#\ NON-REPLICATED-TILE\+\+\+/,/#\ NON-REPLICATED-TILE---/c\ ' ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# REPLICATED-TILE+++/g" ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# REPLICATED-TILE---/g" ./${foundation}-upgrade-tile-temp.yml  
+    else
+        sed -i '/#\ REPLICATED-TILE\+\+\+/,/#\ REPLICATED-TILE---/c\ ' ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# NON-REPLICATED-TILE+++/g" ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# NON-REPLICATED-TILE---/g" ./${foundation}-upgrade-tile-temp.yml
+    fi
+    # clean up the file
+    
+    # change the needed fields in pipeline file
+    sed -i "s/TILE_NAME/$tile_name/g" ./${foundation}-upgrade-tile-temp.yml
+    sed -i "s/INSERT_PRODUCT_HERE/$product_file_name/g" ./${foundation}-upgrade-tile-temp.yml
+    sed -i "s/INSERT_FOUNDATION_HERE/$env_file/g" ./${foundation}-upgrade-tile-temp.yml  
+    sed -i "s/INSERT_PRODUCT_GLOB_HERE/$product_glob/g" ./${foundation}-upgrade-tile-temp.yml
+    cat ./${foundation}-upgrade-tile-temp.yml >> ./all-jobs.yml
+    rm -f ./${foundation}-upgrade-tile-temp.yml ./${foundation}-s3-resources-template.yml
+done
+
+# build the pipeline by appending the new s3-resrouce and jobs templates to the main pipeline file
+# its done in a temp so that the sed replace above for windows doesn't delete everything, just that windows job
+cat ./all-s3-resources.yml >> ./${foundation}-upgrade-tile-pipeline.yml
+echo "jobs:" >> ./${foundation}-upgrade-tile-pipeline.yml
+cat ./all-jobs.yml >> ./${foundation}-upgrade-tile-pipeline.yml
+#cleanup
+rm -f ./all-s3-resources.yml ./all-jobs.yml

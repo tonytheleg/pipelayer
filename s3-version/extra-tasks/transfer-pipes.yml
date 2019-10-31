@@ -1,0 +1,54 @@
+---
+platform: linux
+
+inputs:
+- name: env # contains the env file with target OpsMan Information
+
+params:
+  ENV_FILE: env.yml
+  # - Filepath of the env config YAML
+  # - The path is relative to root of the `env` input
+  REGION_S3_ENDPOINT:
+  REGION_ACCESS_KEY:
+  REGION_SECRET_KEY:
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -ex
+
+    # set some vars
+    ecs_apps_user=$(grep ^ecs_apps_user env/${ENV_FILE} | cut -d ":" -f 2 | tr -d " ")
+    ecs_apps_user_secret=$(grep ^ecs_apps_user_secret env/${ENV_FILE} | cut -d ":" -f 2 | tr -d " ")
+    # using ':' as a delimiter messes with URLs, so gotta grab 2 fields for endpoint
+    ecs_object_endpoint=$(grep ^ecs_object_endpoint env/${ENV_FILE} | cut -d ":" -f 2-4 | tr -d " ")
+    foundation=$(basename ${ENV_FILE} .yml)
+    
+    declare -A product_list
+
+
+    # set mc config
+    echo "setting up mc config..."
+    mc -insecure -C ./mc-config config host add pxe $REGION_S3_ENDPOINT $REGION_ACCESS_KEY $REGION_SECRET_KEY
+    mc -insecure -C ./mc-config config host add $foundation $ecs_object_endpoint $ecs_apps_user $ecs_apps_user_secret
+    
+    # copy all tiles down
+    #mc -insecure -C ./mc-config cp -r pxe/pcf-automation/tiles/ $foundation/pcf-automation/tiles/
+
+    # create an associative array of the current tiles in the foundation
+    for i in `mc -insecure -C ./mc-config ls ${foundation}/pcf-automation/tiles/ | awk '{print $NF}'`; do
+        product_list[$i]=1
+    done
+
+    # check if tile is already in foundation against pxe, otherwise grab that sucka
+    echo "checking for new tiles..."
+    for i in `mc -insecure -C ./mc-config ls pxe/pcf-automation/tiles/ | awk '{print $NF}'`; do
+        if [[ ${product_list[$i]} ]]; then 
+            echo "$i already transfered"
+        else
+            mc -insecure -C ./mc-config cp pxe/pcf-automation/tiles/$i .
+            mc -insecure -C ./mc-config cp $i ${foundation}/pcf-automation/tiles/
+        fi
+    done

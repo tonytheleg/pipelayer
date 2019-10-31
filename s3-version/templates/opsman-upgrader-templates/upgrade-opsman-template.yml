@@ -1,0 +1,156 @@
+resources:
+- name: platform-automation-tasks
+  type: s3
+  source:
+    endpoint: ((ecs_object_endpoint))
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    bucket: pcf-automation
+    regexp: platform-automation-tasks-(.*).zip
+
+- name: platform-automation-image
+  type: s3
+  source:
+    endpoint: ((ecs_object_endpoint))
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    bucket: pcf-automation
+    regexp: platform-automation-image-(.*).tgz
+
+- name: tile-configurator
+  type: git
+  source:
+    uri: ((tile_config_repo))
+    username: ((git_automation.username))
+    password: ((git_automation.password))
+    skip_ssl_verification: true
+
+- name: installation-file
+  type: s3
+  source:
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    endpoint: ((ecs_object_endpoint))
+    bucket: bbr-backup
+    regexp: ((installation_dir))/installation-(.*).zip
+
+- name: ops-manager-image
+  type: s3
+  source:
+    bucket: pcf-automation
+    access_key_id: ((ecs_user.username))
+    secret_access_key: ((ecs_user.password))
+    endpoint: ((ecs_object_endpoint))
+    regexp: tiles/ops-manager-vsphere-(.*).ova
+
+jobs:
+- name: export-installation
+  plan:
+  - in_parallel:
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+    - get: platform-automation-tasks
+      tags: [backups]
+      params:
+        unpack: true
+    - get: tile-configurator
+      tags: [backups]
+  - task: export-installation
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/export-installation.yml
+    input_mapping:
+      env: tile-configurator
+    params:
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+      INSTALLATION_FILE: installation-$timestamp.zip
+      OM_SKIP_SSL_VALIDATION: true
+  - put: installation-file
+    params:
+      file: installation/installation*.zip
+
+- name: upgrade-opsman
+  plan:
+  - in_parallel:
+      - get: platform-automation-image
+        tags: [backups]
+        params:
+          unpack: true
+      - get: platform-automation-tasks
+        tags: [backups]
+        params:
+          unpack: true
+      - get: ops-manager-image
+        tags: [backups]
+      - get: installation-file
+        passed: [ export-installation ]
+        tags: [backups]
+        trigger: true
+      - get: tile-configurator
+        tags: [backups]
+
+  - task: clone-vm
+    tags: [backups]
+    image: platform-automation-image
+    file: tile-configurator/pcf-automation/s3-version/extra-tasks/clone-vm.yml
+    params: 
+      GOVC_URL: ((vcenter_url))
+      GOVC_USERNAME: ((opsman_vcenter.username))
+      GOVC_PASSWORD: ((opsman_vcenter.password))
+      GOVC_DATASTORE: {{vcenter_datastore}}
+      GOVC_RESOURCE_POOL: {{resource_pool}}
+      GOVC_FOLDER: {{vm_folder}}
+      GOVC_VM: ((opsman_vm_name))
+      GOVC_INSECURE: true
+
+  - task: upgrade-opsman
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upgrade-opsman.yml
+    input_mapping:
+      image: ops-manager-image
+      state: tile-configurator
+      config: tile-configurator
+      env: tile-configurator
+      installation: installation-file
+      vars: tile-configurator
+    params:
+      VARS_FILES: vars/envs/INSERT_FOUNDATION_HERE.yml
+      ENV_FILE: automation-configs/opsman/INSERT_FOUNDATION_HERE-opsman-env.yml
+      OPSMAN_CONFIG_FILE: automation-configs/opsman/opsman-config-file.yml
+      STATE_FILE: envs/INSERT_FOUNDATION_HERE.yml
+      INSTALLATION_FILE: installation*.zip
+      OM_SKIP_SSL_VALIDATION: true   
+      GOVC_VM: ((opsman_vm_name))
+    on_failure:
+      task: restore-previous-opsman
+      image: platform-automation-image
+      config:      
+        platform: linux
+        params:
+          GOVC_URL: ((vcenter_url))
+          GOVC_USERNAME: ((opsman_vcenter.username))
+          GOVC_PASSWORD: ((opsman_vcenter.password))
+          GOVC_DATASTORE: {{vcenter_datastore}}
+          GOVC_RESOURCE_POOL: {{resource_pool}}
+          GOVC_FOLDER: {{vm_folder}}
+          GOVC_VM: ((opsman_vm_name))
+          GOVC_INSECURE: true
+        run:
+          path: bash
+          args:
+          - "-c"
+          - |
+            cat /var/version && echo ""
+            set -ux
+            # depending on where it fails we may need to restore the vm
+            # govc doesn't handle errors very well so i have to make my own
+            echo "Checking to see if the current working Ops Manager was deleted..."
+            does_exist=$(govc vm.info "$GOVC_VM")
+            if [ -n "$does_exist" ]; then
+                echo "Current Ops Manager unharmed -- doing nothing"
+            else
+                govc vm.clone -on=true -vm "${GOVC_VM}-PREUPGRADE" "$GOVC_VM" 
+            fi

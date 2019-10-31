@@ -1,0 +1,33 @@
+---
+platform: linux
+
+inputs:
+- name: product
+
+outputs:
+- name: fetched-tile
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -eux
+
+    
+    product_file=$(ls product/*.pivotal)
+    product_slug=$(basename $product_file)
+
+    { printf "\nChecking if product needs winfs injected..."; } 2> /dev/null
+    if [[ "$product_slug" == *"pas-windows"* ]]; then
+
+      # The winfs-injector determines the necessary windows image,
+      # and uses the CF-foundation dockerhub repo
+      # to pull the appropriate Microsoft-hosted foreign layer.
+      winfs-injector \
+      --input-tile "$product_file" \
+      --output-tile "fetched-tile/$product_slug"
+    else
+      mv "$product_file" fetched-tile/
+    fi

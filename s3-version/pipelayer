@@ -1,0 +1,219 @@
+#!/bin/bash
+# Pipelayer gets its inspiration from Maestro. It takes a single argument: a foundation abbreviation (sbx, fog, jcc). 
+# With that information, Pipelayer will use Om to grab first a list of all the tiles in all foundations in a region, 
+# then it grabs a list of the deployed products for that specific foundation specified. It then creates a Concourse 
+# pipeline by copying over the resources and job templates for each product, filling in foundation specific information. 
+# If the product is a replicated tile, or a windows tile, it also detects for that, and modifies the template to remove 
+# unneeded information. Each job is then appended to the master pipeline file. When done, two pipeline files 
+# will be created: the pivnet-to-s3 pipeline for the targeted region, and the foundation specific upgrade pipeline.
+
+lower_envs=(sbx fog pks-fog)
+upper_envs=(lva lvc pxa pxc jca jcc)
+foundation=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+
+# help_me prints the help menu
+help_me() {
+    echo "Usage: pipelayer FOUNDATION (sbx, fog, lva, jcc, etc)"
+    echo "  Options:  -h, --help    Prints usage information"
+}
+
+# grabs all deployed tiles, excludes repicated tiles since they use same base tile
+get_all_products() {
+    om -t "$1" -k -c om-admin -s "$2" curl -s -p /api/v0/deployed/products | 
+        jq -r '.[] | .type' | egrep -v "p-bosh|redislabs|lab|cert|frms|p-windows-runtime"
+}
+
+# grabs all deployed tiles including replicated in a foundation
+get_foundation_products() {
+    om -t "$1" -k -c om-admin -s "$2" curl -s -p /api/v0/deployed/products | 
+        jq -r '.[] | .type' | egrep -v "p-bosh|redislabs|p-windows-runtime"
+}
+
+# sets vars for a target foundation
+set_environment() {
+    env_file=${1}.yml
+    env_path="../../envs/${env_file}"
+    target=$(grep ^target $env_path | cut -d ":" -f 2 | tr -d " ")
+    password=$(grep ^client-secret $env_path | cut -d ":" -f 2 | tr -d " ")
+}
+
+# sets vars from the automation configs for a product
+set_product_vars() {
+    tile_name=$1
+    base_config="../../automation-configs/${tile_name}.yml"
+    product_file_name=${tile_name}.yml
+    product_glob=$(grep ^pivnet-file-glob $base_config | cut -d ":" -f 2 | tr -d " ")
+    product_slug=$(grep ^pivnet-product-slug $base_config | cut -d ":" -f 2 | tr -d " ")
+    product_regex=$(grep ^s3-version-regex $base_config | cut -d ":" -f 2 | tr -d " ")
+}
+
+### MAIN ###
+
+if [ -z "$foundation" ]; then
+    echo "ERROR: You did not provide needed arguments"
+    help_me
+    exit 1
+fi
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    help_me    
+    exit 0
+fi
+
+# clean up old files to ensure no extra files locally
+rm ./${foundation}-upgrade-tile-pipeline.yml &> /dev/null
+rm ./${region}-pivnet-to-s3-pipeline.yml &> /dev/null
+rm ./${foundation}-upgrade-opsman-pipeline.yml &> /dev/null
+rm ./${foundation}-upgrade-stemcells-pipeline.yml &> /dev/null
+
+if [[ "$foundation" == "sbx" || "$foundation" == "fog" || "$foundation" == "pks-fog" ]]; then
+    region="lowers"
+    echo "Grabbing all products for the $region region"
+    for i in "${lower_envs[@]}"; do
+        set_environment $i 
+        get_all_products $target $password >> /tmp/region-products.tmp
+    done
+else
+    region="uppers"
+    echo "Grabbing all products for the $region region"
+    for i in "${upper_envs[@]}"; do
+        set_environment $i 
+        get_all_products $target $password >> /tmp/region-products.tmp
+    done
+fi
+
+# remove duplicates, clean up, reset
+sort /tmp/region-products.tmp | uniq > /tmp/all-region-products.txt && rm /tmp/region-products.tmp
+set_environment $foundation
+products=$(get_foundation_products $target $password)
+
+# copy concourse resource definition templates to the new pipeline file (check the readme for what each template is)
+cp templates/pivnet-to-s3-templates/s3-resources-template.yml ./${region}-pivnet-to-s3-pipeline.yml
+cp templates/tile-upgrader-templates/upgrade-resources-template.yml ./${foundation}-upgrade-tile-pipeline.yml
+
+# sandbox check to ensure proper templates are used, sandbox does not have configure-product steps
+if [[ "$foundation" == "sbx" ]]; then
+    upgrade_tile_template="templates/tile-upgrader-templates/sbx-upgrade-tile-jobs-template.yml"
+else
+    upgrade_tile_template="templates/tile-upgrader-templates/upgrade-tile-jobs-template.yml"
+fi
+
+# create the pivnet-to-s3 pipeline
+echo "Generating the ${region}-pivnet-to-s3 pipeline..."
+for product in `cat /tmp/all-region-products.txt`; do
+    set_product_vars $product
+
+    # grab the s3 resources template so we can create an s3 resource for each tile
+    cat templates/pivnet-to-s3-templates/pivnet-resource-template.yml templates/pivnet-to-s3-templates/s3-region-resource-template.yml > ./${region}-s3-resources-template.yml
+    sed -i "s/TILE_NAME/$tile_name/g" ./${region}-s3-resources-template.yml
+    sed -i "s/INSERT_PRODUCT_REGEX_HERE/$product_regex/g" ./${region}-s3-resources-template.yml
+    
+    # spring cloud 3.x deployment name and pivotal file are different from the slug
+    # the product slug is still p-spring-cloud-services, file is now p_spring-cloud-services
+    # pivotal antivirus has a similar issue
+    if [[ "$product" == "p_spring-cloud-services" ]]; then 
+        sed -i '0,/INSERT_PRODUCT_SLUG_HERE/ s/INSERT_PRODUCT_SLUG_HERE/p-spring-cloud-services/' ./${region}-s3-resources-template.yml
+        sed -i "s/INSERT_PRODUCT_SLUG_HERE/p_spring-cloud-services/g" ./${region}-s3-resources-template.yml
+    elif [[ "$product" == "p-antivirus-mirror" || "$product" == "p-antivirus" ]]; then 
+        sed -i '0,/INSERT_PRODUCT_SLUG_HERE/ s/INSERT_PRODUCT_SLUG_HERE/p-clamav-addon/' ./${region}-s3-resources-template.yml
+        sed -i "s/INSERT_PRODUCT_SLUG_HERE/$product/g" ./${region}-s3-resources-template.yml
+    else  
+        sed -i "s/INSERT_PRODUCT_SLUG_HERE/$product_slug/g" ./${region}-s3-resources-template.yml
+    fi
+    
+    cat ./${region}-s3-resources-template.yml >> ./all-pivnet-s3-resources.yml
+
+    # grab the pivnet-to-s3 jobs template so we can create a job for each tile
+    cp templates/pivnet-to-s3-templates/pivnet-to-s3-jobs-template.yml ./${region}-pivnet-to-s3-temp.yml
+    sed -i "s/TILE_NAME/$tile_name/g" ./${region}-pivnet-to-s3-temp.yml   
+    sed -i "s/INSERT_PRODUCT_GLOB_HERE/$product_glob/g" ./${region}-pivnet-to-s3-temp.yml
+    cat ./${region}-pivnet-to-s3-temp.yml >> ./all-pivnet-s3-jobs.yml
+done
+
+
+# create a job for each product with download, upload, stage, and configure tasks (unless sandbox)
+echo "Generating the ${foundation}-upgrader pipeline"
+for product in ${products[@]}; do
+    set_product_vars $product
+    
+    # we need the s3 resource again, this time without the skip_download setting
+    cp templates/tile-upgrader-templates/s3-tile-resource-template.yml ./${foundation}-s3-resources-template.yml
+    sed -i "s/TILE_NAME/$tile_name/g" ./${foundation}-s3-resources-template.yml
+    sed -i "s/INSERT_PRODUCT_REGEX_HERE/$product_regex/g" ./${foundation}-s3-resources-template.yml
+    
+    # spring and av fixes again
+    if [[ "$product" == "p_spring-cloud-services" ]]; then
+        sed -i "s/INSERT_PRODUCT_SLUG_HERE/p_spring-cloud-services/g" ./${foundation}-s3-resources-template.yml
+    elif [[ "$product" == "p-antivirus-mirror" || "$product" == "p-antivirus" ]]; then
+        sed -i "s/INSERT_PRODUCT_SLUG_HERE/$product/g" ./${foundation}-s3-resources-template.yml
+    else
+        sed -i "s/INSERT_PRODUCT_SLUG_HERE/$product_slug/g" ./${foundation}-s3-resources-template.yml
+    fi
+
+    cat ./${foundation}-s3-resources-template.yml >> ./all-upgrade-tile-resources.yml
+
+    # grab the jobs template so we can create a job for each tile
+    cp $upgrade_tile_template ./${foundation}-upgrade-tile-temp.yml
+
+    # if its windows, we need to pull out specific blocks from the jobs template
+    if [[ "$product" == *"windows"*  ]]; then
+        sed -i '/#\ NON-REPLICATED-TILE\+\+\+/,/#\ NON-REPLICATED-TILE---/c\ ' ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# REPLICATED-TILE+++/g" ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# REPLICATED-TILE---/g" ./${foundation}-upgrade-tile-temp.yml  
+    else
+        sed -i '/#\ REPLICATED-TILE\+\+\+/,/#\ REPLICATED-TILE---/c\ ' ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# NON-REPLICATED-TILE+++/g" ./${foundation}-upgrade-tile-temp.yml 
+        sed -i "/# NON-REPLICATED-TILE---/g" ./${foundation}-upgrade-tile-temp.yml
+    fi
+    
+    # change the needed fields in pipeline file
+    sed -i "s/TILE_NAME/$tile_name/g" ./${foundation}-upgrade-tile-temp.yml
+    sed -i "s/INSERT_PRODUCT_HERE/$product_file_name/g" ./${foundation}-upgrade-tile-temp.yml
+    sed -i "s/INSERT_FOUNDATION_HERE/$foundation/g" ./${foundation}-upgrade-tile-temp.yml  
+    sed -i "s/INSERT_PRODUCT_GLOB_HERE/$product_glob/g" ./${foundation}-upgrade-tile-temp.yml
+    
+    cat ./${foundation}-upgrade-tile-temp.yml >> ./all-upgrade-tile-jobs.yml
+    rm -f ./${foundation}-upgrade-tile-temp.yml ./${foundation}-s3-resources-template.yml ./${foundation}-pivnet-to-s3-temp.yml
+done
+
+# setup the stemcell upgrade jobs
+echo "Setting up stemcell upgrade jobs..."
+cp ./templates/stemcell-upgrader-templates/upgrade-stemcells-template.yml ./${foundation}-upgrade-stemcells-pipeline.yml
+sed -i "s/INSERT_FOUNDATION_HERE/$foundation/g" ./${foundation}-upgrade-stemcells-pipeline.yml
+
+# setup ops-manager templates
+echo "Setting up the opsman upgrade jobs..."
+cp ./templates/pivnet-to-s3-templates/opsmanager-resource-template.yml ./${region}-opsmanager-temp.yml
+product_regex=$(grep ^s3-version-regex ../../automation-configs/opsman/ops-manager.yml | cut -d ":" -f 2 | tr -d " ")
+sed -i "s/INSERT_PRODUCT_REGEX_HERE/$product_regex/g" ./${region}-opsmanager-temp.yml
+cp templates/opsman-upgrader-templates/upgrade-opsman-template.yml ./${foundation}-upgrade-opsman-pipeline.yml
+sed -i "s/INSERT_FOUNDATION_HERE/$foundation/g" ./${foundation}-upgrade-opsman-pipeline.yml
+
+# combine all these temp files we created together in the right order
+# pivnet-to-s3 pipeline: pivnet-s3-resources --> pivnet-s3-jobs goes into one pipeline
+echo "time to make the doughnuts....putting it all together!"
+cat ./${region}-opsmanager-temp.yml ./all-pivnet-s3-resources.yml >> ./${region}-pivnet-to-s3-pipeline.yml
+echo "jobs:" >> ./${region}-pivnet-to-s3-pipeline.yml
+cat ./templates/pivnet-to-s3-templates/opsmanager-job-template.yml ./all-pivnet-s3-jobs.yml >> ./${region}-pivnet-to-s3-pipeline.yml
+
+# add static transfer-pipes pipelines to pivnet-to-s3 pipeline if uppers
+if [[ "$region" == "uppers" ]]; then
+    cat templates/pivnet-to-s3-templates/uppers-transfer-pipes-pipeline.yml >> ./${region}-pivnet-to-s3-pipeline.yml
+fi
+
+# tile-upgrader pipeline: upgrade-tile-resources --> upgrade-tile-jobs --> upgrade-stemcell-jobs into one pipeline
+cat ./all-upgrade-tile-resources.yml >> ./${foundation}-upgrade-tile-pipeline.yml
+echo "jobs:" >> ./${foundation}-upgrade-tile-pipeline.yml
+cat ./all-upgrade-tile-jobs.yml >> ./${foundation}-upgrade-tile-pipeline.yml
+
+# normally slugs match the file name, but SSO apparently wants to be original -- thanks pivotal
+sed -i 's/tiles\/pivotal_single_sign-on_service-/tiles\/Pivotal_Single_Sign-On_Service_/g' ./${region}-pivnet-to-s3-pipeline.yml
+sed -i 's/tiles\/pivotal_single_sign-on_service-/tiles\/Pivotal_Single_Sign-On_Service_/g' ./${foundation}-upgrade-tile-pipeline.yml
+
+# cleanup
+rm -f ./all-*.yml \
+      /tmp/all-region-products.txt \
+      ./*temp.yml \
+      ./*template.yml \
+      ./${region}-opsmanager-temp.yml
+      &> /dev/null
+echo "DIIIIIING, all done"

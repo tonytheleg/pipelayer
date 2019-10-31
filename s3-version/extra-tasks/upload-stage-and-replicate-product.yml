@@ -1,0 +1,69 @@
+# The inputs, outputs, params, filename, and filepath
+# of this task file are part of its semantically versioned API.
+# See our documentation for a detailed discussion of our semver API.
+# See www.semver.org for an explanation of semantic versioning.
+
+# code_snippet upload-and-stage-product start yaml
+---
+platform: linux
+
+inputs:
+- name: product # contains the product file to be uploaded and staged
+- name: env # contains the env file with target OpsMan Information
+- name: config # contains the product configuration file
+  optional: true
+
+params:
+  CONFIG_FILE: 
+
+  ENV_FILE: env.yml
+  # - Filepath of the env config YAML
+  # - The path is relative to root of the `env` input
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -eux
+
+    product_version=$(cut -d '-' -f 1 product/version)
+    product_file=$(basename product/*.pivotal)
+
+    # replicate tile
+
+    tile_config=$(basename $CONFIG_FILE)
+    tile_name=${tile_config%.*}
+
+    case $tile_name in
+    "pas-windows-cert-wrt")
+      replicator -name "cert-wrt" -path "product/$product_file" -output "product/${tile_name}.pivotal"
+      rm -f "product/$product_file"
+      ;;
+    "pas-windows-lab-wrt")
+      replicator -name "lab-wrt" -path "product/$product_file" -output "product/${tile_name}.pivotal"
+      rm -f "product/$product_file"
+      ;;
+    "p-windows-runtime-lab-wrt")
+      replicator -name "lab-wrt" -path "product/$product_file" -output "product/${tile_name}.pivotal"
+      rm -f "product/$product_file"
+      ;;
+    "p-windows-runtime-frms-lab")
+      replicator -name "frms-lab" -path "product/$product_file" -output "product/${tile_name}.pivotal"
+      rm -f "product/$product_file"
+      ;;
+    "p-windows-runtime-cert-wrt")
+      replicator -name "cert-wrt" -path "product/$product_file" -output "product/${tile_name}.pivotal"
+      rm -f "product/$product_file"
+      ;;
+    esac
+
+    om --env env/"${ENV_FILE}" upload-product \
+       --product product/*.pivotal 
+
+    om --env env/"${ENV_FILE}" stage-product \
+       --product-name "$tile_name" \
+       --product-version "$product_version"
+
+# code_snippet upload-and-stage-product end

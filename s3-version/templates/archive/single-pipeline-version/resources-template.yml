@@ -1,0 +1,41 @@
+resource_types:
+- name: pivnet
+  type: docker-image
+  source:
+    repository: ((docker_registry))/pivnet-resource
+    insecure_registries: ["((docker_registry)):443"]
+
+resources:
+- name: platform-automation-tasks
+  type: s3
+  source:
+    endpoint: ((ecs_object_endpoint))
+    access_key_id: ((ecs_apps_user))
+    secret_access_key: ((ecs_apps_user_secret))
+    bucket: pcf-automation
+    regexp: platform-automation-tasks-(.*).zip
+
+- name: platform-automation-image
+  type: s3
+  source:
+    endpoint: ((ecs_object_endpoint))
+    access_key_id: ((ecs_apps_user))
+    secret_access_key: ((ecs_apps_user_secret))
+    bucket: pcf-automation
+    regexp: platform-automation-image-(.*).tgz
+
+- name: pcf-tile-configurator
+  type: git
+  source:
+    uri: ((tile_config_repo))
+    private_key: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAaAAAABNlY2RzYS
+      1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQQAbw5J1NggJnOF6IJqLLcZar/C154j
+      RkvNcrrw3Say8vWcZqllVntZYO8gx0ZunQzNJTVJgZTsl/oyC3DTBf9HAAAAqBj8e2IY/H
+      tiAAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBABvDknU2CAmc4Xo
+      gmostxlqv8LXniNGS81yuvDdJrLy9ZxmqWVWe1lg7yDHRm6dDM0lNUmBlOyX+jILcNMF/0
+      cAAAAgPkJk0etOCew/VQ9KgvTH7kIijRHl9R7H7gibfJXU38QAAAALdG9ueUBmcmlkYXkB
+      AgMEBQ==
+      -----END OPENSSH PRIVATE KEY-----
+

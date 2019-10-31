@@ -1,0 +1,10 @@
+- name: pivnet-TILE_NAME
+  type: pivnet
+  check_every: 24h
+  source:
+    skip_ssl_verification: true
+    api_token: ((pivnet_token))
+    product_slug: INSERT_PRODUCT_SLUG_HERE
+    product_version: INSERT_PRODUCT_REGEX_HERE
+    sort_by: semver
+

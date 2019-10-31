@@ -1,0 +1,42 @@
+---
+platform: linux
+
+inputs:
+- name: env
+
+params:
+  ENV_FILE: 
+  CONCOURSE_USER:
+  CONCOURSE_PASS:
+  CONCOURSE_URL:
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    cat /var/version && echo ""
+    set -x
+
+    pushd env/pcf-automation/s3-version/
+
+    foundation_file=$(basename $ENV_FILE)
+    foundation=$(echo ${foundation_file%.*})
+
+    # build the pipeline
+    ./pipelayer $foundation
+
+    # fly throws x509 errors if concourses cert isn't in trusted store
+    echo -n | openssl s_client  -connect ${CONCOURSE_URL}:443 2>/dev/null | openssl x509 -text | sed -n -e '/BEGIN\ CERTIFICATE/,/END\ CERTIFICATE/ p' > /usr/local/share/ca-certificates/${CONCOURSE_URL}.crt
+    update-ca-certificates
+
+    # are we in lowers or uppers
+    if [[ "$foundation" == "sbx" || "$foundation" == "fog" || "$foundation" == "pks-fog" ]]; then
+        fly -t fog login -c https://${CONCOURSE_URL} -n main -u $CONCOURSE_USER -p $CONCOURSE_PASS
+        fly -t fog dp -p lowers-pivnet-to-s3 -n 
+        fly -t fog sp -p lowers-pivnet-to-s3 -n -c lowers-pivnet-to-s3-pipeline.yml -l ../../envs/${foundation_file}
+    else
+        fly -t pxe login -c https://${CONCOURSE_URL} -n main -u $CONCOURSE_USER -p $CONCOURSE_PASS
+        fly -t pxe dp -p uppers-pivnet-to-s3 -n
+        fly -t pxe sp -p uppers-pivnet-to-s3 -n -c uppers-pivnet-to-s3-pipeline.yml -l ../../envs/${foundation_file}
+    fi

@@ -1,0 +1,56 @@
+- name: pivnet-to-s3-TILE_NAME
+  plan:
+  - aggregate:
+    - get: pivnet-TILE_NAME
+      trigger: true
+      tags: [backups]
+      params:
+        globs:
+        - INSERT_PRODUCT_GLOB_HERE
+  - put: TILE_NAME-tile
+    params:
+      file: "pivnet-TILE_NAME/*.pivotal"
+
+- name: upgrade-TILE_NAME-tile
+  plan:
+  - aggregate:
+    - get: TILE_NAME-tile
+      tags: [backups]
+      passed:
+      - pivnet-to-s3-TILE_NAME
+      trigger: true
+    - get: pcf-tile-configurator
+      tags: [backups]
+    - get: platform-automation-image
+      tags: [backups]
+      params:
+        unpack: true
+    - get: platform-automation-tasks
+      tags: [backups]
+      params:
+        unpack: true
+  
+# NON-REPLICATED-TILE+++
+  - task: upload-and-stage-product
+    tags: [backups]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-and-stage-product.yml
+    input_mapping:
+      product: TILE_NAME-tile
+      env: pcf-tile-configurator
+    params:
+      ENV_FILE: envs/INSERT_FOUNDATION_HERE
+# NON-REPLICATED-TILE---
+# REPLICATED-TILE+++
+  - task: upload-stage-and-replicate-product
+    tags: [backups]
+    image: platform-automation-image
+    file: pcf-tile-configurator/pcf-automation/s3-version/extra-tasks/upload-stage-and-replicate-product.yml
+    input_mapping:
+      product: TILE_NAME-tile
+      env: pcf-tile-configurator
+      config: pcf-tile-configurator
+    params:
+      ENV_FILE: envs/INSERT_FOUNDATION_HERE
+      CONFIG_FILE: automation-configs/INSERT_PRODUCT_HERE
+# REPLICATED-TILE---

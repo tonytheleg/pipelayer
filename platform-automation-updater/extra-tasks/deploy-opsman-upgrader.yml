@@ -1,0 +1,49 @@
+---
+platform: linux
+
+inputs:
+- name: env
+
+params:
+  ENV_FILE: 
+  CONCOURSE_USER:
+  CONCOURSE_PASS:
+  CONCOURSE_URL:
+
+run:
+  path: bash
+  args:
+  - "-c"
+  - |
+    set -x
+
+    pushd env/pcf-automation/s3-version/
+
+    foundation_file=$(basename $ENV_FILE)
+    foundation=$(echo ${foundation_file%.*})
+
+    # define the region foundations to loop through
+    lower_envs=(sbx fog pks-fog)
+    upper_envs=(lva lvc pxa pxc jca jcc)
+
+    # fly throws x509 errors if concourses cert isn't in trusted store
+    echo -n | openssl s_client  -connect ${CONCOURSE_URL}:443 2>/dev/null | openssl x509 -text | sed -n -e '/BEGIN\ CERTIFICATE/,/END\ CERTIFICATE/ p' > /usr/local/share/ca-certificates/${CONCOURSE_URL}.crt
+    update-ca-certificates
+
+    # set the region
+    if [[ "$foundation" == "sbx" || "$foundation" == "fog" || "$foundation" == "pks-fog" ]]; then
+        region=${lower_envs[@]}
+        concourse_env=fog
+    else
+        region=${upper_envs[@]}
+        concourse_env=pxe
+    fi
+    
+    # buiild the pipeline
+    for i in $region; do
+        ./pipelayer $i
+        fly -t $concourse_env login -c https://$CONCOURSE_URL -n $i -u $CONCOURSE_USER -p $CONCOURSE_PASS
+        fly -t $concourse_env dp -p ${i}-opsman-upgrader -n 
+        fly -t $concourse_env sp -p ${i}-opsman-upgrader -n -c ${i}-upgrade-opsman-pipeline.yml -l ../../envs/${i}.yml
+    done
+

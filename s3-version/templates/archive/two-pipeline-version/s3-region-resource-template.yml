@@ -1,0 +1,9 @@
+- name: TILE_NAME-tile
+  type: s3
+  source:
+    bucket: pcf-automation
+    access_key_id: ((region_s3_access_key))
+    secret_access_key: ((region_s3_secret_key))
+    endpoint: ((region_s3_endpoint))
+    regexp: tiles/INSERT_PRODUCT_SLUG_HERE-(.*).pivotal
+
